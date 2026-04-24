@@ -2,15 +2,46 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.invitation import Invitation
 from ..models.protocol import TreatmentProtocol
+from ..models.session import EmotionSession, SessionMessage, SessionStatus
 from ..models.user import User
 from ..schemas.protocol import PatientSummary, ProtocolResponse, ProtocolUpsertRequest
 from .deps import require_therapist
+
+
+# ── analytics schemas ──────────────────────────────────────────────────────────
+
+class WellbeingPoint(BaseModel):
+    session_id: str
+    date: str
+    before: int
+    after: int | None
+
+
+class EmotionFrequency(BaseModel):
+    emotion: str
+    count: int
+    avg_intensity: float
+
+
+class DistortionFrequency(BaseModel):
+    type: str
+    count: int
+
+
+class PatientAnalytics(BaseModel):
+    wellbeing_over_time: list[WellbeingPoint]
+    emotion_frequency: list[EmotionFrequency]
+    cognitive_distortions: list[DistortionFrequency]
+    session_count: int
+    completed_session_count: int
+    avg_wellbeing_delta: float | None
 
 router = APIRouter()
 
@@ -131,3 +162,89 @@ async def upsert_protocol(
     await db.commit()
     await db.refresh(protocol)
     return protocol
+
+
+@router.get("/patients/{patient_id}/analytics", response_model=PatientAnalytics)
+async def patient_analytics(
+    patient_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    therapist: User = Depends(require_therapist),
+) -> PatientAnalytics:
+    await _get_patient_of_therapist(patient_id, therapist, db)
+
+    sessions = list(await db.scalars(
+        select(EmotionSession)
+        .where(EmotionSession.patient_id == patient_id)
+        .order_by(EmotionSession.created_at)
+    ))
+
+    if not sessions:
+        return PatientAnalytics(
+            wellbeing_over_time=[],
+            emotion_frequency=[],
+            cognitive_distortions=[],
+            session_count=0,
+            completed_session_count=0,
+            avg_wellbeing_delta=None,
+        )
+
+    session_ids = [s.id for s in sessions]
+    all_messages = list(await db.scalars(
+        select(SessionMessage).where(SessionMessage.session_id.in_(session_ids))
+    ))
+
+    emotion_map: dict[str, dict] = {}
+    distortion_map: dict[str, int] = {}
+
+    for msg in all_messages:
+        if msg.role != "assistant" or not msg.extracted_data:
+            continue
+        for e in msg.extracted_data.get("identified_emotions", []):
+            t = e.get("type", "")
+            if not t:
+                continue
+            if t not in emotion_map:
+                emotion_map[t] = {"count": 0, "total": 0}
+            emotion_map[t]["count"] += 1
+            emotion_map[t]["total"] += e.get("intensity", 0)
+        if d := msg.extracted_data.get("cognitive_distortion"):
+            distortion_map[d] = distortion_map.get(d, 0) + 1
+
+    wellbeing_over_time = [
+        WellbeingPoint(
+            session_id=str(s.id),
+            date=s.created_at.strftime("%d.%m"),
+            before=s.wellbeing_before,
+            after=s.wellbeing_after,
+        )
+        for s in sessions
+    ]
+
+    deltas = [
+        s.wellbeing_after - s.wellbeing_before
+        for s in sessions
+        if s.wellbeing_after is not None
+    ]
+    avg_delta = round(sum(deltas) / len(deltas), 1) if deltas else None
+
+    return PatientAnalytics(
+        wellbeing_over_time=wellbeing_over_time,
+        emotion_frequency=sorted(
+            [
+                EmotionFrequency(
+                    emotion=k,
+                    count=v["count"],
+                    avg_intensity=round(v["total"] / v["count"], 1),
+                )
+                for k, v in emotion_map.items()
+            ],
+            key=lambda x: -x.count,
+        ),
+        cognitive_distortions=sorted(
+            [DistortionFrequency(type=k, count=v) for k, v in distortion_map.items()],
+            key=lambda x: -x.count,
+        ),
+        session_count=len(sessions),
+        completed_session_count=sum(1 for s in sessions if s.status == SessionStatus.completed),
+        avg_wellbeing_delta=avg_delta,
+    )
