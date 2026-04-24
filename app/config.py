@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     # Anthropic (Claude) — wymagane do sesji terapeutycznych
     anthropic_api_key: str = ""
 
-    # OpenAI (Whisper) — wymagane do transkrypcji głosu
-    openai_api_key: str = ""
+    # Groq (Whisper) — wymagane do transkrypcji głosu
+    groq_api_key: str = ""
 
     # Email (Resend) — wymagane do powiadomień kryzysowych
     resend_api_key: str = ""

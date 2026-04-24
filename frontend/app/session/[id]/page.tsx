@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import BodyMap, { SomaticEntry } from "@/components/body-map";
+import VoiceButton from "@/components/voice-button";
 import { api } from "@/lib/api";
 import { isLoggedIn } from "@/lib/auth";
 
@@ -272,19 +273,23 @@ export default function SessionPage() {
 
         {/* ── CHAT INPUT ── */}
         {CHAT_STAGES.has(session.current_stage) && !isCrisis && (
-          <form onSubmit={handleChatSend} className="flex gap-2 shrink-0">
+          <form onSubmit={handleChatSend} className="flex items-end gap-2 shrink-0">
+            <VoiceButton
+              onTranscription={(text) => setChatInput((prev) => prev ? `${prev} ${text}` : text)}
+              disabled={chatLoading}
+            />
             <input
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Napisz odpowiedź…"
+              placeholder="Napisz lub nagraj odpowiedź…"
               disabled={chatLoading}
               className="flex-1 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={chatLoading || !chatInput.trim()}
-              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
+              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap"
             >
               Wyślij
             </button>
