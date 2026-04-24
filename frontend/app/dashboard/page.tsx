@@ -4,6 +4,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+interface SessionItem {
+  id: string;
+  status: string;
+  current_stage: string;
+  trigger_text: string;
+  wellbeing_before: number;
+  wellbeing_after: number | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  somatic: "Mapa ciała",
+  emotion_id: "Emocje",
+  thought_excavation: "Myśli",
+  chain_challenging: "Podważenie",
+  closing: "Zamknięcie",
+  completed: "Ukończona",
+};
+
 import { api } from "@/lib/api";
 import { clearTokens, isLoggedIn } from "@/lib/auth";
 
@@ -37,6 +57,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
 
   const [patientNameHint, setPatientNameHint] = useState("");
   const [invitation, setInvitation] = useState<Invitation | null>(null);
@@ -55,6 +76,9 @@ export default function DashboardPage() {
         if (res.data.role === "therapist") {
           const pRes = await api.get("/api/patients");
           setPatients(pRes.data);
+        } else {
+          const sRes = await api.get("/api/sessions");
+          setSessions(sRes.data);
         }
       })
       .catch(() => {
@@ -230,11 +254,59 @@ export default function DashboardPage() {
 
         {/* Panel pacjenta */}
         {user.role === "patient" && (
-          <section className="bg-white rounded-2xl border border-slate-200 p-6">
-            <h3 className="font-semibold text-slate-800 mb-2">Sesje emocjonalne</h3>
-            <p className="text-slate-500 text-sm">
-              Tutaj będą widoczne Twoje sesje. Funkcja w budowie — wróć wkrótce.
-            </p>
+          <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Sesje emocjonalne</h3>
+              <Link
+                href="/session/new"
+                className="bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                + Nowa sesja
+              </Link>
+            </div>
+
+            {sessions.length === 0 ? (
+              <p className="text-sm text-slate-400">
+                Nie masz jeszcze żadnych sesji.
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {sessions.map((s) => (
+                  <li key={s.id}>
+                    <Link
+                      href={`/session/${s.id}`}
+                      className="flex items-center justify-between py-3 hover:bg-slate-50 -mx-2 px-2 rounded-lg transition"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-800 truncate">{s.trigger_text}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {new Date(s.created_at).toLocaleDateString("pl-PL", {
+                            day: "numeric", month: "long",
+                          })}
+                          {" · "}Samopoczucie: {s.wellbeing_before}/10
+                          {s.wellbeing_after !== null && ` → ${s.wellbeing_after}/10`}
+                        </p>
+                      </div>
+                      <span
+                        className={`ml-3 shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${
+                          s.status === "completed"
+                            ? "bg-green-50 text-green-700"
+                            : s.status === "crisis"
+                            ? "bg-red-50 text-red-700"
+                            : "bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {s.status === "completed"
+                          ? "Ukończona"
+                          : s.status === "crisis"
+                          ? "Kryzys"
+                          : STAGE_LABELS[s.current_stage] ?? s.current_stage}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         )}
 
