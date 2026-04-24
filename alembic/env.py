@@ -9,7 +9,7 @@ from alembic import context
 
 from app.config import settings
 from app.database import Base
-from app.models import user, invitation  # noqa: F401 — rejestruje modele w metadanych
+from app.models import user, invitation, protocol  # noqa: F401 — rejestruje modele w metadanych
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

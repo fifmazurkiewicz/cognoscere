@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -22,12 +23,21 @@ interface Invitation {
   patient_name_hint: string | null;
 }
 
+interface Patient {
+  id: string;
+  display_name: string | null;
+  first_name: string;
+  email: string;
+  has_protocol: boolean;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Stan dla terapeuty — tworzenie zaproszenia
+  const [patients, setPatients] = useState<Patient[]>([]);
+
   const [patientNameHint, setPatientNameHint] = useState("");
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -40,7 +50,13 @@ export default function DashboardPage() {
     }
     api
       .get("/api/auth/me")
-      .then((res) => setUser(res.data))
+      .then(async (res) => {
+        setUser(res.data);
+        if (res.data.role === "therapist") {
+          const pRes = await api.get("/api/patients");
+          setPatients(pRes.data);
+        }
+      })
       .catch(() => {
         clearTokens();
         router.push("/login");
@@ -86,7 +102,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Nagłówek */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
         <div>
           <span className="font-bold text-slate-800 text-lg">Cognoscere</span>
@@ -108,10 +123,9 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-10 space-y-8">
-        {/* Powitanie */}
         <div>
           <h2 className="text-2xl font-bold text-slate-800">
-            Cześć, {user.display_name ?? user.first_name} 👋
+            Cześć, {user.display_name ?? user.first_name}
           </h2>
           <p className="text-slate-500 mt-1 text-sm">
             {user.role === "therapist"
@@ -122,58 +136,96 @@ export default function DashboardPage() {
 
         {/* Panel terapeuty */}
         {user.role === "therapist" && (
-          <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
-            <h3 className="font-semibold text-slate-800">Zaproś pacjenta</h3>
-            <form onSubmit={handleCreateInvitation} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Imię lub pseudonim pacjenta{" "}
-                  <span className="text-slate-400 font-normal">(opcjonalne)</span>
-                </label>
-                <input
-                  type="text"
-                  value={patientNameHint}
-                  onChange={(e) => setPatientNameHint(e.target.value)}
-                  placeholder="np. Marek"
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
-                />
-              </div>
-              {inviteError && (
-                <p className="text-red-600 text-sm">{inviteError}</p>
-              )}
-              <button
-                type="submit"
-                disabled={inviteLoading}
-                className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
-              >
-                {inviteLoading ? "Generowanie…" : "Generuj link zaproszenia"}
-              </button>
-            </form>
+          <>
+            {/* Lista pacjentów */}
+            <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+              <h3 className="font-semibold text-slate-800">
+                Twoi pacjenci{" "}
+                <span className="text-slate-400 font-normal text-sm">({patients.length})</span>
+              </h3>
 
-            {invitation && (
-              <div className="bg-brand-50 border border-brand-100 rounded-xl p-4 space-y-3">
-                <p className="text-sm font-medium text-brand-800">
-                  Link zaproszenia wygenerowany — ważny 72 godziny
+              {patients.length === 0 ? (
+                <p className="text-sm text-slate-400">
+                  Brak pacjentów. Wygeneruj link zaproszenia poniżej.
                 </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-white border border-brand-200 rounded-lg px-3 py-2 text-slate-700 break-all">
-                    {invitation.invite_url}
-                  </code>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(invitation.invite_url)}
-                    className="shrink-0 text-xs bg-brand-500 text-white px-3 py-2 rounded-lg hover:bg-brand-600 transition"
-                  >
-                    Kopiuj
-                  </button>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {patients.map((p) => (
+                    <li key={p.id} className="py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">
+                          {p.display_name ?? p.first_name}
+                        </p>
+                        <p className="text-xs text-slate-400">{p.email}</p>
+                      </div>
+                      <Link
+                        href={`/patients/${p.id}`}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg transition ${
+                          p.has_protocol
+                            ? "bg-brand-50 text-brand-600 hover:bg-brand-100"
+                            : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                        }`}
+                      >
+                        {p.has_protocol ? "Edytuj protokół" : "Ustaw protokół"}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {/* Zaproszenie */}
+            <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
+              <h3 className="font-semibold text-slate-800">Zaproś nowego pacjenta</h3>
+              <form onSubmit={handleCreateInvitation} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Imię lub pseudonim pacjenta{" "}
+                    <span className="text-slate-400 font-normal">(opcjonalne)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={patientNameHint}
+                    onChange={(e) => setPatientNameHint(e.target.value)}
+                    placeholder="np. Marek"
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                  />
                 </div>
-                <p className="text-xs text-slate-400">
-                  Wyślij ten link pacjentowi SMS-em lub emailem.
-                  Wygasa:{" "}
-                  {new Date(invitation.expires_at).toLocaleString("pl-PL")}
-                </p>
-              </div>
-            )}
-          </section>
+                {inviteError && (
+                  <p className="text-red-600 text-sm">{inviteError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={inviteLoading}
+                  className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+                >
+                  {inviteLoading ? "Generowanie…" : "Generuj link zaproszenia"}
+                </button>
+              </form>
+
+              {invitation && (
+                <div className="bg-brand-50 border border-brand-100 rounded-xl p-4 space-y-3">
+                  <p className="text-sm font-medium text-brand-800">
+                    Link ważny 72 godziny — wyślij pacjentowi SMS-em lub emailem
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-white border border-brand-200 rounded-lg px-3 py-2 text-slate-700 break-all">
+                      {invitation.invite_url}
+                    </code>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(invitation.invite_url)}
+                      className="shrink-0 text-xs bg-brand-500 text-white px-3 py-2 rounded-lg hover:bg-brand-600 transition"
+                    >
+                      Kopiuj
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Wygasa: {new Date(invitation.expires_at).toLocaleString("pl-PL")}
+                  </p>
+                </div>
+              )}
+            </section>
+          </>
         )}
 
         {/* Panel pacjenta */}
@@ -186,10 +238,9 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* Info o statusie API */}
         <section className="bg-slate-100 rounded-xl px-5 py-4">
           <p className="text-xs text-slate-500">
-            Backend API:{" "}
+            Dokumentacja API:{" "}
             <a
               href="http://localhost:8000/docs"
               target="_blank"
@@ -197,8 +248,7 @@ export default function DashboardPage() {
               className="text-brand-600 hover:underline"
             >
               localhost:8000/docs
-            </a>{" "}
-            · Swagger z pełną dokumentacją endpointów
+            </a>
           </p>
         </section>
       </main>
