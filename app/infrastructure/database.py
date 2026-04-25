@@ -5,10 +5,18 @@ from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.sqlalchemy_echo,
-)
+def db_connect_args() -> dict:
+    if settings.database_ssl:
+        # asyncpg: szyfrowane połączenie (np. Google Cloud SQL z public IP)
+        return {"ssl": True}
+    return {}
+
+
+_engine_kw: dict = {"echo": settings.sqlalchemy_echo}
+if settings.database_ssl:
+    _engine_kw["connect_args"] = db_connect_args()
+
+engine = create_async_engine(settings.database_url, **_engine_kw)
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 

@@ -6,7 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 
 import { GuestThemeControls } from "@/components/guest-theme-controls";
 import { PasswordInput } from "@/components/password-input";
-import { api } from "@/lib/api";
+import { api, getApiErrorMessage } from "@/lib/api";
 import { saveTokens } from "@/lib/auth";
 
 function RegisterForm() {
@@ -71,11 +71,7 @@ function RegisterForm() {
       }
       router.push("/dashboard");
     } catch (err: unknown) {
-      const msg =
-        err && typeof err === "object" && "response" in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : undefined;
-      setError(msg ?? "Błąd rejestracji. Spróbuj ponownie.");
+      setError(getApiErrorMessage(err) ?? "Błąd rejestracji. Spróbuj ponownie.");
     } finally {
       setLoading(false);
     }

@@ -6,8 +6,18 @@ Aplikacja wspierająca psychoterapię poprzez ustrukturyzowany dialog terapeutyc
 
 - Python 3.12+
 - [Poetry](https://python-poetry.org/docs/#installation) (zarządzanie zależnościami backendu)
-- Node.js 20+
+- Node.js 20+ (lokalny dev; obraz produkcyjny w `deploy/gcp` używa Node 22)
 - **PostgreSQL** (14+) — instalacja na Windowsie, baza w chmurze (Neon, Supabase itd.) albo **opcjonalnie** kontener z `docker-compose.yml`
+
+---
+
+## Wdrożenie na Google Cloud (produkcja)
+
+Pełna ścieżka: **Cloud SQL + VM (Ubuntu) + Docker Compose + Caddy** — szczegóły w **[`docs/GCP_KROK_PO_KROKU.md`](docs/GCP_KROK_PO_KROKU.md)**.
+
+- Pliki: [`deploy/gcp/`](deploy/gcp/) — `docker-compose.yml`, `Dockerfile.backend`, `Dockerfile.frontend`, `nginx-edge.conf`, wzór [`deploy/gcp/.env.example`](deploy/gcp/.env.example) i [`Caddyfile.host.example`](deploy/gcp/Caddyfile.host.example).
+- Ruch: internet → **Caddy** (80/443) → **nginx edge** na `127.0.0.1:8080` → Next.js / FastAPI.
+- Sekrety: kopiujesz `deploy/gcp/.env.example` → `deploy/gcp/.env` (nie commituj); ustaw m.in. `DATABASE_URL`, `FRONTEND_URL` (dokładnie origin z przeglądarki), `SECRET_KEY`, `OPENROUTER_API_KEY`.
 
 ---
 
@@ -110,32 +120,35 @@ cognoscere/
 │   ├── main.py
 │   ├── domain/                 # typy domenowe (np. role)
 │   ├── application/            # JWT, bootstrap admina
-│   ├── infrastructure/       # config, baza, ORM, OpenRouter (LLM)
-│   └── presentation/         # API FastAPI, schematy Pydantic
+│   ├── infrastructure/         # config, baza, ORM, OpenRouter (LLM)
+│   └── presentation/           # API FastAPI, schematy Pydantic
 ├── alembic/
-├── frontend/                 # Next.js 15 (app/, lib/, components/)
-├── docker-compose.yml        # opcjonalnie: PostgreSQL w kontenerze
-├── pyproject.toml            # Poetry — zależności i metadane
-├── poetry.lock               # zablokowane wersje (generuje Poetry)
+├── deploy/gcp/                 # Docker Compose + Dockerfile pod VM / GCP
+├── docs/
+│   └── GCP_KROK_PO_KROKU.md    # wdrożenie krok po kroku
+├── frontend/                   # Next.js 15 (app/, lib/, components/, public/)
+├── docker-compose.yml          # opcjonalnie: PostgreSQL w kontenerze (lokal)
+├── pyproject.toml              # Poetry — zależności i metadane
+├── poetry.lock
 └── .env.example
 ```
 
 ---
 
-## API - dostepne endpointy
+## API — dostępne endpointy
 
-| Metoda | Sciezka | Opis | Autoryzacja |
+| Metoda | Ścieżka | Opis | Autoryzacja |
 |---|---|---|---|
 | GET | `/api/health` | Status backendu | - |
 | POST | `/api/auth/register/therapist` | Rejestracja terapeuty | - |
 | POST | `/api/auth/login` | Logowanie | - |
-| POST | `/api/auth/refresh` | Odswiezenie tokenu | - |
-| GET | `/api/auth/me` | Dane zalogowanego uzytkownika | JWT |
+| POST | `/api/auth/refresh` | Odświeżenie tokenu | - |
+| GET | `/api/auth/me` | Dane zalogowanego użytkownika | JWT |
 | POST | `/api/auth/invite` | Generowanie zaproszenia dla pacjenta | JWT (terapeuta) |
 | GET | `/api/auth/invite/{token}` | Weryfikacja tokenu zaproszenia | - |
 | POST | `/api/auth/register/patient` | Rejestracja pacjenta przez token | - |
 
-Pelna dokumentacja z przykladami: http://localhost:8000/docs
+Pełna dokumentacja z przykładami: http://localhost:8000/docs
 
 ---
 

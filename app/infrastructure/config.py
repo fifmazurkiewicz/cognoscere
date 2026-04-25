@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    # Cloud SQL (publiczny IP) zwykle wymaga szyfrowanego połączenia; wtedy ustaw true w .env
+    database_ssl: bool = False
 
     secret_key: str
     algorithm: str = "HS256"

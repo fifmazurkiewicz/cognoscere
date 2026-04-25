@@ -4,7 +4,9 @@ Wdrożenie: **Cloud SQL (PostgreSQL) + jedna lub więcej VM z Ubuntu + Docker Co
 
 Wzorowane na [TeacherHelper — GCP Krok po kroku](https://github.com/fifmazurkiewicz/TeacherHelper/blob/main/docs/GCP_KROK_PO_KROKU.md). **Różnice względem TeacherHelper:** Cognoscere **nie** używa Redis ani Qdrant; backend to **FastAPI** (w sieci Dockera port **8000**); frontend **Next.js** (port **3000** wewnątrz Compose).
 
-**Pliki w repozytorium:** [`deploy/gcp/`](../deploy/gcp/) — `docker-compose.yml`, `nginx-edge.conf`, `Dockerfile.backend`, `Dockerfile.frontend`, `entrypoint-backend.sh`, [`Caddyfile.host.example`](../deploy/gcp/Caddyfile.host.example), wzór [`.env.example`](../deploy/gcp/.env.example). Plików **`.env` nie commituj** (ani root `.env`, ani `frontend/.env.local`).
+**Pliki w repozytorium:** [`deploy/gcp/`](../deploy/gcp/) — `docker-compose.yml`, `nginx-edge.conf`, `Dockerfile.backend`, `Dockerfile.frontend`, `entrypoint-backend.sh`, [`Caddyfile.host.example`](../deploy/gcp/Caddyfile.host.example) (przykład z `cognoscere.duckdns.org` — podmień host na swój), wzór [`.env.example`](../deploy/gcp/.env.example). W root jest [`README.md`](../README.md) wymagany przez Poetry przy budowaniu obrazu backendu; w [`frontend/public/`](../frontend/public/) leży katalog publiczny Next (w tym `.gitkeep`) — potrzebny do `Dockerfile.frontend`. Plików **`.env` nie commituj** (ani root `.env`, ani `frontend/.env.local`).
+
+W repozytorium jest też [`frontend/eslint.config.mjs`](../frontend/eslint.config.mjs) (lint przy `next build`); w obrazie frontendu używane jest **Alpine** z pakietem `libc6-compat` i zwiększonym limitem pamięci na czas `npm run build` — opis w [`Dockerfile.frontend`](../deploy/gcp/Dockerfile.frontend).
 
 ---
 
@@ -113,7 +115,7 @@ sudo apt install -y git vim ca-certificates curl
 Instalacja **Docker Engine** i wtyczki **Compose** — oficjalna instrukcja dla Ubuntu: [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/). W skrócie (po dodaniu repozytorium Dockera według dokumentacji):
 
 - zainstaluj pakiety `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin`;
-- opcjonalnie dodaj użytkownika do grupy `docker`, aby nie pisać ciągle `sudo` przy `docker` (wymaga wylogowania / nowej sesji).
+- opcjonalnie: `sudo usermod -aG docker "$USER"` i **ponowne logowanie SSH**, albo w tej samej sesji `newgrp docker` — inaczej zobaczysz `permission denied` na `/var/run/docker.sock` i używasz `sudo docker compose ...`.
 
 Sprawdzenie:
 
@@ -140,6 +142,7 @@ vim .env
 | Zmienna | Znaczenie |
 |---------|-----------|
 | `DATABASE_URL` | Pełny URL do Cloud SQL (jak wyżej). |
+| `DATABASE_SSL` | Ustaw `true` na GCP — połączenia z publicznym IP do Cloud SQL zwykle **wymagają SSL**; bez tego bywa `TimeoutError` w Alembic/asyncpg. |
 | `SECRET_KEY` | Losowy sekret JWT (np. `openssl rand -hex 32`). |
 | `OPENROUTER_API_KEY` | Klucz API OpenRouter (wymagany do funkcji LLM). |
 | `FRONTEND_URL` | **Dokładnie** origin z paska przeglądarki: `https://twoja.domena` lub `http://IP` lub `https://twoj.duckdns.org` — **bez** końcowego `/`. |
@@ -151,7 +154,7 @@ vim .env
 
 ## Krok 7 — Build i start kontenerów
 
-Z katalogu `cognoscere/deploy/gcp`:
+Z katalogu `cognoscere/deploy/gcp` (z `sudo`, jeśli nie masz grupy `docker`):
 
 ```bash
 docker compose --env-file .env build
@@ -159,10 +162,14 @@ docker compose --env-file .env up -d
 docker compose ps
 ```
 
+**Pierwszy build** może trwać kilka minut. Gdy zmieniasz pliki związane z Dockerem albo `git pull` nie odświeża warstw, użyj `docker compose --env-file .env build --no-cache` (lub tylko `... build --no-cache frontend` / `backend`).
+
 - **Migracje:** przy starcie backendu wykonywany jest `alembic upgrade head` (`entrypoint-backend.sh`).
 - **Logi:** `docker compose logs -f backend` (baza, Alembic, błędy konfiguracji).
 
 Jeśli backend nie może połączyć się z Cloud SQL, sprawdź: `DATABASE_URL`, **Authorized networks** (IP VM), firewall po stronie GCP, czy instancja SQL jest **uruchomiona**.
+
+**Caddy** musi być skonfigurowany **po** działającym Compose — inaczej `127.0.0.1:8080` zwróci 502. Plik na hoście: `/etc/caddy/Caddyfile` (edycja: `sudo vim` / `sudo nano`); zwykły użytkownik nie zapisze go przez `permission denied` (`E45` w vimie).
 
 ---
 
@@ -181,10 +188,10 @@ Caddy odbiera ruch z internetu i przekazuje go do nginx edge na **`127.0.0.1:808
 }
 ```
 
-**HTTPS z domeną (np. DuckDNS):** blok z nazwą hosta — Caddy może sam wystawić certyfikat (Let’s Encrypt), o ile DNS **A** wskazuje na IP VM i port **443** jest otwarty:
+**HTTPS z domeną (np. DuckDNS):** blok z nazwą hosta — Caddy może sam wystawić certyfikat (Let’s Encrypt), o ile DNS **A** wskazuje na IP VM i port **443** jest otwarty. W repozytorium przykład używa hosta `cognoscere.duckdns.org`; podmień na własny:
 
 ```caddy
-twoj-host.duckdns.org {
+cognoscere.duckdns.org {
 	reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -218,11 +225,16 @@ docker compose --env-file .env up -d --force-recreate backend
 
 | Objaw | Co sprawdzić |
 |-------|----------------|
-| **502 Bad Gateway** z Caddy | Czy `docker compose ps` pokazuje działające usługi; czy `curl -sS http://127.0.0.1:8080/api/health` na VM zwraca odpowiedź. |
-| **Connection refused** na 8080 z zewnątrz | To OK — 8080 ma być tylko na localhost; użytkownik wchodzi na 80/443. |
-| **Błąd połączenia z PostgreSQL** | `DATABASE_URL`, Authorized networks (IP VM `/32`), czy DB działa; hasło i URL encoding. |
+| `permission denied` / `docker.sock` | Grupa `docker` + nowa sesja SSH, albo `sudo docker compose ...`. |
+| **502 Bad Gateway** z Caddy | Czy `docker compose ps` pokazuje **Up**; czy `curl -sS http://127.0.0.1:8080/api/health` na VM zwraca JSON (nie *connection refused*). |
+| **Connection refused** na 8080 z zewnątrz | To OK — 8080 tylko na localhost; ruch z internetu idzie na 80/443. |
+| Build backendu: `Readme path ... README.md does not exist` | Obraz wymaga [`README.md`](../README.md) w kontekście (kopiowane w `Dockerfile.backend`); `git pull` do aktualnego repozytorium. |
+| Build frontendu: *webpack errors* / problemy na Alpine | Zaktualizuj repozytorium (`eslint.config.mjs`, `libc6-compat` w Dockerfile); ewentualnie `build --no-cache`. |
+| Build frontendu: `"/app/public": not found` | W projekcie musi istnieć `frontend/public/` (w repozytorium jest m.in. `.gitkeep`); w Dockerfile jest też `mkdir -p public` przed `npm run build`. |
+| **Błąd połączenia z PostgreSQL** / `TimeoutError` w `alembic` | `DATABASE_URL` (host = **publiczny** adres instancji z konsoli), **Authorized networks** = IP VM `/32`, hasło, URL encoding. Ustaw **`DATABASE_SSL=true`** w `deploy/gcp/.env` (Cloud SQL + public IP). |
 | **CORS** | `FRONTEND_URL` = dokładnie scheme + host jak w pasku adresu. |
-| **Migracje** | Logi `backend`; konflikt przy **wielu VM** uruchamiających migracje jednocześnie — rozważ migracje z jednego miejsca (jedna VM lub CI). |
+| Ostrzeżenie Caddy przy `validate` o HTTP bez HTTPS | Często znika po samej domenie w `Caddyfile` i restarcie; w `journalctl` szukaj sukcesu `certificate obtained` albo błędów ACME. |
+| **Migracje** | Logi `backend`; przy **wielu VM** nie odpalaj równolegle migracji z obu — jedna instancja lub CI. |
 
 ---
 
