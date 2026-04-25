@@ -1,11 +1,10 @@
-import axios, {
-  type AxiosError,
-  type InternalAxiosRequestConfig,
-} from "axios";
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from "./auth";
 
 const baseURL = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+type ConfigWithRetry = InternalAxiosRequestConfig & { _retry?: boolean };
 
 export const api = axios.create({
   baseURL,
@@ -34,16 +33,14 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 api.interceptors.response.use(
   (res) => res,
   async (err: AxiosError) => {
-    const original = err.config;
+    const original = err.config as ConfigWithRetry | undefined;
     if (!original || isAuthPath(original.url) || err.response?.status !== 401) {
       return Promise.reject(err);
     }
 
-    // @ts-expect-error — znacznik powtórki żądania
     if (original._retry) {
       return Promise.reject(err);
     }
-    // @ts-expect-error
     original._retry = true;
 
     const refresh = getRefreshToken();
