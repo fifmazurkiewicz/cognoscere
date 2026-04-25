@@ -23,6 +23,7 @@ RUN poetry install --without dev --no-root --no-ansi
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+COPY README.md ./
 
 RUN poetry install --without dev --no-ansi
 
