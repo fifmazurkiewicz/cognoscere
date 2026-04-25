@@ -1,0 +1,16 @@
+# Caddy na hoście VM — proxy do kontenera edge (nginx) na 127.0.0.1:8080.
+# Wcięcia w blokach Caddy: tabulatory. Szczegóły: docs/GCP_KROK_PO_KROKU.md
+#
+# --- Wariant 1: tylko HTTP (np. http://ZEWNETRZNE_IP) ---
+# :80 {
+# 	reverse_proxy 127.0.0.1:8080
+# }
+#
+# --- Wariant 2: HTTPS (DNS A → IP VM) ---
+# twoja.domena.pl {
+# 	reverse_proxy 127.0.0.1:8080
+# }
+
+:80 {
+	reverse_proxy 127.0.0.1:8080
+}

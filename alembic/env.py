@@ -7,9 +7,15 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-from app.config import settings
-from app.database import Base
-from app.models import user, invitation, protocol, session  # noqa: F401 — rejestruje modele w metadanych
+from app.infrastructure.config import settings
+from app.infrastructure.database import Base
+from app.infrastructure.persistence import (  # noqa: F401 — rejestruje modele
+    daily_checkin,
+    invitation,
+    protocol,
+    session,
+    user,
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

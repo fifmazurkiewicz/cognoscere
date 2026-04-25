@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { AppHeader, type HeaderUser } from "@/components/app-header";
+import { api } from "@/lib/api";
+import { clearTokens, isLoggedIn } from "@/lib/auth";
+
 interface SessionItem {
   id: string;
   status: string;
@@ -24,18 +28,6 @@ const STAGE_LABELS: Record<string, string> = {
   completed: "Ukończona",
 };
 
-import { api } from "@/lib/api";
-import { clearTokens, isLoggedIn } from "@/lib/auth";
-
-interface User {
-  id: string;
-  email: string;
-  role: "therapist" | "patient";
-  first_name: string;
-  display_name: string | null;
-  professional_title: string | null;
-}
-
 interface Invitation {
   token: string;
   invite_url: string;
@@ -53,7 +45,7 @@ interface Patient {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<HeaderUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -70,12 +62,20 @@ export default function DashboardPage() {
       return;
     }
     api
-      .get("/api/auth/me")
+      .get<HeaderUser>("/api/auth/me")
       .then(async (res) => {
+        if (res.data.role === "admin") {
+          router.replace("/admin");
+          return;
+        }
         setUser(res.data);
         if (res.data.role === "therapist") {
-          const pRes = await api.get("/api/patients");
+          const [pRes, sRes] = await Promise.all([
+            api.get("/api/patients"),
+            api.get<SessionItem[]>("/api/sessions"),
+          ]);
           setPatients(pRes.data);
+          setSessions(sRes.data);
         } else {
           const sRes = await api.get("/api/sessions");
           setSessions(sRes.data);
@@ -109,14 +109,9 @@ export default function DashboardPage() {
     }
   }
 
-  function handleLogout() {
-    clearTokens();
-    router.push("/login");
-  }
-
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
         <p className="text-slate-400 text-sm">Ładowanie…</p>
       </div>
     );
@@ -125,33 +120,15 @@ export default function DashboardPage() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-        <div>
-          <span className="font-bold text-slate-800 text-lg">Cognoscere</span>
-          <span className="ml-3 text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full font-medium">
-            {user.role === "therapist" ? "Terapeuta" : "Pacjent"}
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-500">
-            {user.display_name ?? user.first_name}
-          </span>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-slate-400 hover:text-slate-700 transition"
-          >
-            Wyloguj
-          </button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
+      <AppHeader user={user} />
 
-      <main className="max-w-3xl mx-auto px-6 py-10 space-y-8">
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 space-y-8 flex-1 w-full">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">
+          <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
             Cześć, {user.display_name ?? user.first_name}
           </h2>
-          <p className="text-slate-500 mt-1 text-sm">
+          <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm">
             {user.role === "therapist"
               ? `${user.professional_title ?? "Terapeuta"} · ${user.email}`
               : `Pacjent · ${user.email}`}
@@ -161,9 +138,58 @@ export default function DashboardPage() {
         {/* Panel terapeuty */}
         {user.role === "therapist" && (
           <>
+            <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+              <h3 className="font-semibold text-slate-800 dark:text-slate-100">
+                Dla Ciebie — sesje i Daily
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Te same narzędzia co dla pacjentów: krótki check-in Daily oraz pełna sesja emocjonalna z AI
+                (na własny użytek).
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  href="/daily"
+                  className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  Daily
+                </Link>
+                <Link
+                  href="/sessions"
+                  className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  Moje sesje
+                </Link>
+                <Link
+                  href="/session/new"
+                  className="bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                >
+                  + Nowa sesja
+                </Link>
+              </div>
+              {sessions.length > 0 && (
+                <ul className="divide-y divide-slate-100 dark:divide-slate-800 border-t border-slate-100 dark:border-slate-800 pt-3 mt-2">
+                  {sessions.slice(0, 5).map((s) => (
+                    <li key={s.id}>
+                      <Link
+                        href={`/session/${s.id}`}
+                        className="flex items-center justify-between py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50 -mx-2 px-2 rounded-lg transition"
+                      >
+                        <span className="text-slate-700 dark:text-slate-200 truncate pr-2">
+                          {s.trigger_text}
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-400">
+                          {STAGE_LABELS[s.current_stage] ?? s.current_stage}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
             {/* Lista pacjentów */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
-              <h3 className="font-semibold text-slate-800">
+            <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+              <h3 className="font-semibold text-slate-800 dark:text-slate-100">
                 Twoi pacjenci{" "}
                 <span className="text-slate-400 font-normal text-sm">({patients.length})</span>
               </h3>
@@ -199,8 +225,8 @@ export default function DashboardPage() {
             </section>
 
             {/* Zaproszenie */}
-            <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
-              <h3 className="font-semibold text-slate-800">Zaproś nowego pacjenta</h3>
+            <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5">
+              <h3 className="font-semibold text-slate-800 dark:text-slate-100">Zaproś nowego pacjenta</h3>
               <form onSubmit={handleCreateInvitation} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
@@ -233,7 +259,7 @@ export default function DashboardPage() {
                     Link ważny 72 godziny — wyślij pacjentowi SMS-em lub emailem
                   </p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 text-xs bg-white border border-brand-200 rounded-lg px-3 py-2 text-slate-700 break-all">
+                    <code className="flex-1 text-xs bg-white dark:bg-slate-950 border border-brand-200 dark:border-brand-800 rounded-lg px-3 py-2 text-slate-700 dark:text-slate-200 break-all">
                       {invitation.invite_url}
                     </code>
                     <button
@@ -254,15 +280,23 @@ export default function DashboardPage() {
 
         {/* Panel pacjenta */}
         {user.role === "patient" && (
-          <section className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-800">Sesje emocjonalne</h3>
-              <Link
-                href="/session/new"
-                className="bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-              >
-                + Nowa sesja
-              </Link>
+          <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-6">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <h3 className="font-semibold text-slate-800 dark:text-slate-100">Sesje emocjonalne</h3>
+              <div className="flex items-center gap-3 flex-wrap">
+                <Link
+                  href="/sessions"
+                  className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  Pełna historia →
+                </Link>
+                <Link
+                  href="/session/new"
+                  className="bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                >
+                  + Nowa sesja
+                </Link>
+              </div>
             </div>
 
             {sessions.length === 0 ? (
@@ -270,48 +304,78 @@ export default function DashboardPage() {
                 Nie masz jeszcze żadnych sesji.
               </p>
             ) : (
-              <ul className="divide-y divide-slate-100">
-                {sessions.map((s) => (
-                  <li key={s.id}>
-                    <Link
-                      href={`/session/${s.id}`}
-                      className="flex items-center justify-between py-3 hover:bg-slate-50 -mx-2 px-2 rounded-lg transition"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-800 truncate">{s.trigger_text}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {new Date(s.created_at).toLocaleDateString("pl-PL", {
-                            day: "numeric", month: "long",
-                          })}
-                          {" · "}Samopoczucie: {s.wellbeing_before}/10
-                          {s.wellbeing_after !== null && ` → ${s.wellbeing_after}/10`}
-                        </p>
-                      </div>
-                      <span
-                        className={`ml-3 shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${
-                          s.status === "completed"
-                            ? "bg-green-50 text-green-700"
-                            : s.status === "crisis"
-                            ? "bg-red-50 text-red-700"
-                            : "bg-amber-50 text-amber-700"
-                        }`}
+              <>
+                {(() => {
+                  const active = sessions.filter((s) => s.status !== "completed");
+                  const history = sessions.filter((s) => s.status === "completed");
+                  const formatWhen = (iso: string) =>
+                    new Date(iso).toLocaleString("pl-PL", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    });
+                  const row = (s: SessionItem) => (
+                    <li key={s.id}>
+                      <Link
+                        href={`/session/${s.id}`}
+                        className="flex items-center justify-between py-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 -mx-2 px-2 rounded-lg transition"
                       >
-                        {s.status === "completed"
-                          ? "Ukończona"
-                          : s.status === "crisis"
-                          ? "Kryzys"
-                          : STAGE_LABELS[s.current_stage] ?? s.current_stage}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-slate-800 dark:text-slate-100 truncate">{s.trigger_text}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {formatWhen(s.created_at)}
+                            {" · "}Samopoczucie: {s.wellbeing_before}/10
+                            {s.wellbeing_after !== null && ` → ${s.wellbeing_after}/10`}
+                          </p>
+                        </div>
+                        <span
+                          className={`ml-3 shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${
+                            s.status === "completed"
+                              ? "bg-green-50 text-green-700"
+                              : s.status === "crisis"
+                              ? "bg-red-50 text-red-700"
+                              : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {s.status === "completed"
+                            ? "Ukończona"
+                            : s.status === "crisis"
+                            ? "Kryzys"
+                            : STAGE_LABELS[s.current_stage] ?? s.current_stage}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                  return (
+                    <>
+                      {active.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                            W toku ({active.length})
+                          </h4>
+                          <ul className="divide-y divide-slate-100 dark:divide-slate-800">{active.map(row)}</ul>
+                        </div>
+                      )}
+                      {history.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                            Historia — zakończone ({history.length})
+                          </h4>
+                          <ul className="divide-y divide-slate-100 dark:divide-slate-800">{history.map(row)}</ul>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </>
             )}
           </section>
         )}
 
-        <section className="bg-slate-100 rounded-xl px-5 py-4">
-          <p className="text-xs text-slate-500">
+        <section className="bg-slate-100 dark:bg-slate-900/50 rounded-xl px-5 py-4 border border-slate-200/80 dark:border-slate-800">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Dokumentacja API:{" "}
             <a
               href="http://localhost:8000/docs"

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { GuestThemeControls } from "@/components/guest-theme-controls";
+import { PasswordInput } from "@/components/password-input";
 import { api } from "@/lib/api";
 import { saveTokens } from "@/lib/auth";
 
@@ -34,18 +36,19 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950 transition-colors">
+      <GuestThemeControls />
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-slate-800">Cognoscere</h1>
-          <p className="text-slate-500 mt-2 text-sm">
+          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Cognoscere</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm">
             Zaloguj się do aplikacji
           </p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-5"
+          className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-8 space-y-5"
         >
           {error && (
             <div className="bg-red-50 text-red-700 text-sm rounded-lg px-4 py-3 border border-red-200">
@@ -54,7 +57,7 @@ export default function LoginPage() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               Email
             </label>
             <input
@@ -64,24 +67,16 @@ export default function LoginPage() {
               required
               autoComplete="email"
               placeholder="twoj@email.pl"
-              className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+              className="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-950 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Hasło
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              placeholder="••••••••"
-              className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
-            />
-          </div>
+          <PasswordInput
+            label="Hasło"
+            value={password}
+            onChange={setPassword}
+            autoComplete="current-password"
+          />
 
           <button
             type="submit"
@@ -91,9 +86,9 @@ export default function LoginPage() {
             {loading ? "Logowanie…" : "Zaloguj się"}
           </button>
 
-          <p className="text-center text-sm text-slate-500">
+          <p className="text-center text-sm text-slate-500 dark:text-slate-400">
             Jesteś terapeutą i nie masz konta?{" "}
-            <Link href="/register" className="text-brand-600 hover:underline font-medium">
+            <Link href="/register" className="text-brand-600 dark:text-brand-400 hover:underline font-medium">
               Zarejestruj się
             </Link>
           </p>

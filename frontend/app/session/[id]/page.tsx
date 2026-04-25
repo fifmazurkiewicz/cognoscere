@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import BodyMap, { SomaticEntry } from "@/components/body-map";
+import { AppHeader, type HeaderUser } from "@/components/app-header";
 import { api } from "@/lib/api";
 import { isLoggedIn } from "@/lib/auth";
 
@@ -13,6 +14,7 @@ interface Message {
   content: string;
   stage: string;
   created_at: string;
+  extracted_data?: Record<string, unknown>;
 }
 
 interface Session {
@@ -23,6 +25,7 @@ interface Session {
   wellbeing_before: number;
   wellbeing_after: number | null;
   ai_summary: string | null;
+  patient_facing_analysis: string | null;
   crisis_flag: boolean;
   messages: Message[];
 }
@@ -36,7 +39,6 @@ const STAGE_LABELS: Record<string, string> = {
   completed: "Ukończona",
 };
 
-const STAGE_ORDER = ["somatic", "emotion_id", "thought_excavation", "chain_challenging", "closing", "completed"];
 const CHAT_STAGES = new Set(["emotion_id", "thought_excavation", "chain_challenging"]);
 
 function StageBar({ current }: { current: string }) {
@@ -48,13 +50,17 @@ function StageBar({ current }: { current: string }) {
         <div key={s} className="flex items-center gap-1">
           <div
             className={`h-1.5 rounded-full transition-all ${
-              i < idx ? "bg-brand-500 w-8" : i === idx ? "bg-brand-500 w-10" : "bg-slate-200 w-8"
+              i < idx
+                ? "bg-brand-500 w-8"
+                : i === idx
+                  ? "bg-brand-500 w-10"
+                  : "bg-slate-200 dark:bg-slate-700 w-8"
             }`}
           />
           {i < stages.length - 1 && <div className="w-0" />}
         </div>
       ))}
-      <span className="ml-2 text-xs text-slate-500 font-medium">
+      <span className="ml-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
         {STAGE_LABELS[current] ?? current}
       </span>
     </div>
@@ -67,6 +73,7 @@ export default function SessionPage() {
   const sessionId = params.id as string;
 
   const [session, setSession] = useState<Session | null>(null);
+  const [headerUser, setHeaderUser] = useState<HeaderUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Body map state
@@ -82,13 +89,28 @@ export default function SessionPage() {
   const [wellbeingAfter, setWellbeingAfter] = useState(5);
   const [closingLoading, setClosingLoading] = useState(false);
 
+  const [analysisText, setAnalysisText] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
+
   useEffect(() => {
     if (typeof window !== "undefined" && !isLoggedIn()) {
       router.push("/login");
       return;
     }
-    api.get(`/api/sessions/${sessionId}`)
-      .then((res) => setSession(res.data))
+    Promise.all([
+      api.get<HeaderUser>("/api/auth/me"),
+      api.get<Session>(`/api/sessions/${sessionId}`),
+    ])
+      .then(([me, sess]) => {
+        setHeaderUser(me.data);
+        setSession(sess.data);
+        if (sess.data.patient_facing_analysis) {
+          setAnalysisText(sess.data.patient_facing_analysis);
+          setShowAnalysisPanel(true);
+        }
+      })
       .catch(() => router.push("/dashboard"))
       .finally(() => setLoading(false));
   }, [sessionId, router]);
@@ -172,52 +194,119 @@ export default function SessionPage() {
     }
   }
 
-  if (loading) {
+  const canRequestAnalysis =
+    !!session &&
+    (session.messages.some((m) => m.role === "assistant") ||
+      !!(session.ai_summary && session.ai_summary.trim()));
+
+  async function handleAnalyze() {
+    setAnalysisLoading(true);
+    setAnalysisError("");
+    try {
+      const res = await api.post<{ analysis: string; from_cache: boolean }>(
+        `/api/sessions/${sessionId}/analyze`
+      );
+      setAnalysisText(res.data.analysis);
+      setShowAnalysisPanel(true);
+      setSession((prev) =>
+        prev ? { ...prev, patient_facing_analysis: res.data.analysis } : prev
+      );
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      setAnalysisError(String(msg ?? "Nie udało się wygenerować analizy."));
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }
+
+  if (loading || !session || !headerUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
         <p className="text-slate-400 text-sm">Ładowanie sesji…</p>
       </div>
     );
   }
 
-  if (!session) return null;
-
   const isCrisis = session.status === "crisis";
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
+      <AppHeader user={headerUser} />
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0 flex-wrap gap-2">
+        <div className="flex items-center gap-4 flex-wrap">
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-slate-400 hover:text-slate-700 text-sm transition"
+            className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-sm transition"
           >
             ← Dashboard
           </button>
           <StageBar current={session.current_stage} />
         </div>
-        {isCrisis && (
-          <span className="text-xs font-medium text-red-600 bg-red-50 px-3 py-1 rounded-full border border-red-200">
-            Tryb kryzysowy
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {canRequestAnalysis && (
+            <>
+              {!analysisText ? (
+                <button
+                  type="button"
+                  onClick={() => void handleAnalyze()}
+                  disabled={analysisLoading}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                >
+                  {analysisLoading ? "Analizuję…" : "Analizuj"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowAnalysisPanel((v) => !v)}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg border border-violet-200 dark:border-violet-800 text-violet-800 dark:text-violet-200 bg-violet-50 dark:bg-violet-950/50 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors"
+                >
+                  {showAnalysisPanel ? "Ukryj analizę" : "Pokaż analizę"}
+                </button>
+              )}
+            </>
+          )}
+          {isCrisis && (
+            <span className="text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 px-3 py-1 rounded-full border border-red-200 dark:border-red-900">
+              Tryb kryzysowy
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="flex-1 overflow-hidden flex flex-col max-w-2xl w-full mx-auto px-4 py-6 gap-4">
 
+        {analysisError && (
+          <div className="bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm rounded-xl px-4 py-3 border border-red-200 dark:border-red-900">
+            {analysisError}
+          </div>
+        )}
+
+        {showAnalysisPanel && analysisText && (
+          <div className="bg-violet-50/80 dark:bg-violet-950/35 rounded-xl border border-violet-200 dark:border-violet-900 px-4 py-4 space-y-2 shrink-0">
+            <p className="text-xs font-semibold text-violet-900 dark:text-violet-200 uppercase tracking-wide">
+              Analiza sesji
+            </p>
+            <div className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
+              {analysisText}
+            </div>
+          </div>
+        )}
+
         {/* Trigger text (always visible, collapsed) */}
-        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
-          <p className="text-xs font-medium text-slate-400 mb-1">Sytuacja</p>
-          <p className="text-sm text-slate-700 line-clamp-2">{session.trigger_text}</p>
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3">
+          <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mb-1">Sytuacja</p>
+          <p className="text-sm text-slate-700 dark:text-slate-200 line-clamp-2">{session.trigger_text}</p>
         </div>
 
         {/* ── SOMATIC STAGE ── */}
         {session.current_stage === "somatic" && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5 flex-1 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 flex-1 overflow-y-auto">
             <div>
-              <h2 className="font-semibold text-slate-800">Gdzie to czujesz w ciele?</h2>
-              <p className="text-sm text-slate-500 mt-1">
+              <h2 className="font-semibold text-slate-800 dark:text-slate-100">Gdzie to czujesz w ciele?</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                 Zaznacz obszary w których coś czujesz — możesz wybrać kilka.
                 Jeśli nie czujesz nic szczególnego, pomiń ten krok.
               </p>
@@ -248,7 +337,7 @@ export default function SessionPage() {
                       ? "bg-brand-500 text-white rounded-br-sm"
                       : isCrisis && msg.stage === session.current_stage && msg.role === "assistant"
                       ? "bg-red-50 border border-red-200 text-red-800 rounded-bl-sm"
-                      : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
+                      : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-bl-sm"
                   }`}
                 >
                   {msg.content}
@@ -272,23 +361,30 @@ export default function SessionPage() {
 
         {/* ── CHAT INPUT ── */}
         {CHAT_STAGES.has(session.current_stage) && !isCrisis && (
-          <form onSubmit={handleChatSend} className="flex gap-2 shrink-0">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Napisz odpowiedź…"
-              disabled={chatLoading}
-              className="flex-1 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={chatLoading || !chatInput.trim()}
-              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
-            >
-              Wyślij
-            </button>
-          </form>
+          <div className="shrink-0 space-y-2">
+            <form onSubmit={handleChatSend} className="flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Napisz odpowiedź…"
+                disabled={chatLoading}
+                className="flex-1 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={chatLoading || !chatInput.trim()}
+                className="bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
+              >
+                Wyślij
+              </button>
+            </form>
+            <p className="text-xs text-slate-500 leading-snug">
+              Utknąłeś na tym kroku (np. błąd asystenta)? Wyślij wiadomość:{" "}
+              <span className="font-medium text-slate-600">Przejdź dalej</span> — przejdziesz do
+              następnego etapu.
+            </p>
+          </div>
         )}
 
         {/* ── CRISIS ── */}
@@ -311,7 +407,7 @@ export default function SessionPage() {
 
         {/* ── CLOSING STAGE ── */}
         {session.current_stage === "closing" && !isCrisis && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5 shrink-0">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 shrink-0">
             <div>
               <h2 className="font-semibold text-slate-800">Zakończ sesję</h2>
               {session.ai_summary && (
@@ -350,7 +446,7 @@ export default function SessionPage() {
 
         {/* ── COMPLETED ── */}
         {session.current_stage === "completed" && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shrink-0">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shrink-0">
             <div className="flex items-center gap-3">
               <span className="text-2xl">✓</span>
               <div>

@@ -1,0 +1,45 @@
+# Cognoscere na GCP — Ścieżka A (Cloud SQL + jedna VM + Docker Compose).
+# Redis / Qdrant nie są wymagane przez ten projekt.
+#
+# Na VM (SSH), z katalogu deploy/gcp:
+#   cp .env.example .env && chmod 600 .env
+#   # uzupełnij .env (DATABASE_URL, SECRET_KEY, FRONTEND_URL, OPENROUTER…)
+#   docker compose --env-file .env build
+#   docker compose --env-file .env up -d
+#
+# Frontend + API z zewnątrz: Caddy na hoście → http://127.0.0.1:8080
+# (patrz docs/GCP_KROK_PO_KROKU.md).
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/gcp/Dockerfile.backend
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deploy/gcp/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  edge:
+    image: nginx:1.27-alpine
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./nginx-edge.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped

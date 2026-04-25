@@ -5,8 +5,9 @@ Aplikacja wspierająca psychoterapię poprzez ustrukturyzowany dialog terapeutyc
 ## Wymagania
 
 - Python 3.12+
+- [Poetry](https://python-poetry.org/docs/#installation) (zarządzanie zależnościami backendu)
 - Node.js 20+
-- Docker i Docker Compose
+- **PostgreSQL** (14+) — instalacja na Windowsie, baza w chmurze (Neon, Supabase itd.) albo **opcjonalnie** kontener z `docker-compose.yml`
 
 ---
 
@@ -14,86 +15,88 @@ Aplikacja wspierająca psychoterapię poprzez ustrukturyzowany dialog terapeutyc
 
 ### 1. Skopiuj plik środowiskowy i uzupełnij wartości
 
-```bash
-cp .env.example .env
-```
-
-Minimalne wymagane wartości do lokalnego uruchomienia:
+PowerShell / CMD: `copy .env.example .env` — na Linux/macOS: `cp .env.example .env`.
 
 | Zmienna | Co wpisać |
 |---|---|
-| `DATABASE_URL` | zostaw domyślną (pasuje do docker-compose) |
-| `REDIS_URL` | zostaw domyślną |
-| `SECRET_KEY` | wygeneruj: `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `ANTHROPIC_API_KEY` | potrzebny do sesji AI — pobierz z console.anthropic.com |
-| `OPENAI_API_KEY` | potrzebny do voice — pobierz z platform.openai.com |
+| `DATABASE_URL` | `postgresql+asyncpg://USER:HASŁO@HOST:5432/BAZA` — musi wskazywać na **działający PostgreSQL**. Utwórz wcześniej pustą bazę (np. `cognoscere`). |
+| `SECRET_KEY` | np. `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `OPENROUTER_API_KEY` | [OpenRouter](https://openrouter.ai) — domyślnie Llama 3.1 8B przez Groq |
+| `BOOTSTRAP_ADMIN_*` | opcjonalnie: pierwszy administrator po migracji |
 
-### 2. Uruchom bazę danych i Redis
+### 2. PostgreSQL bez Dockera
 
-```bash
-docker-compose up -d
-```
+- **Windows:** [instalator PostgreSQL](https://www.postgresql.org/download/windows/). Musi istnieć **baza o nazwie z `DATABASE_URL`** (domyślnie `cognoscere`). Jeśli widzisz błąd *database "cognoscere" does not exist*, utwórz ją:
+  - **SQL Shell (psql)** z menu Start → połącz się jako `postgres` → wykonaj:  
+    `CREATE DATABASE cognoscere;`
+  - albo **pgAdmin** → PPM na *Databases* → *Create* → *Database* → nazwa `cognoscere`.
+  - z linii poleceń (hasło użytkownika `postgres` z instalacji):  
+    `"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE cognoscere;"`  
+    (numer folderu `16` zmień na swoją wersję).
+- **Chmura:** w panelu utwórz projekt/bazę; często nazwa bazy jest nadana automatycznie — **skopiuj dokładny connection string** do `DATABASE_URL` (nie musi nazywać się `cognoscere`).
 
-Sprawdź że kontenery działają:
-```bash
-docker-compose ps
-```
+Docker **nie jest wymagany** — `docker-compose.yml` jest tylko opcją.
 
 ### 3. Zainstaluj zależności backendu
 
 ```bash
-pip install -e ".[dev]"
+poetry install --with dev
 ```
 
-### 4. Wykonaj migracje bazy danych
+Środowisko: `.venv` w katalogu projektu (`poetry.toml`).
+
+### 4. Migracje
+
+W repozytorium jest **jedna** migracja początkowa (`0001_initial`): cały schemat (ENUM-y w tym `userrole`, `users` z limitami LLM, `emotion_sessions` z `patient_facing_analysis` itd.). Kolejne zmiany: `make migration msg="krótki_opis"`.
 
 ```bash
-# Wygeneruj pierwszą migrację (jednorazowo)
-alembic revision --autogenerate -m "initial"
-
-# Zastosuj migracje
-alembic upgrade head
+poetry run alembic upgrade head
 ```
 
-### 5. Uruchom backend
+Jeśli w `alembic_version` masz starą nazwę rewizji (np. po usuniętych plikach migracji) albo częściowo utworzone tabele — usuń obiekty w bazie lub utwórz pustą bazę i ponów `upgrade head`.
+
+### 5. Backend
 
 ```bash
-uvicorn app.main:app --reload --port 8000
+poetry run uvicorn app.main:app --reload --port 8000
 ```
 
-Backend dostępny pod: http://localhost:8000
-Dokumentacja API (Swagger): http://localhost:8000/docs
+http://localhost:8000 — dokumentacja: http://localhost:8000/docs
 
-### 6. Zainstaluj zależności frontendu (nowy terminal)
+### 6. Frontend (drugi terminal)
+
+PowerShell / CMD (z katalogu głównego projektu):
+
+```powershell
+cd frontend
+copy .env.local.example .env.local
+npm install
+npm run dev
+```
+
+Linux / macOS:
 
 ```bash
 cd frontend
 cp .env.local.example .env.local
 npm install
-```
-
-### 7. Uruchom frontend
-
-```bash
-cd frontend
 npm run dev
 ```
 
-Frontend dostępny pod: http://localhost:3000
+Frontend: http://localhost:3000
 
 ---
 
 ## Komendy Make (skróty)
 
 ```bash
-make up          # uruchom PostgreSQL + Redis w tle
-make down        # zatrzymaj kontenery
-make install     # zainstaluj zależnosci backendu i frontendu
-make migrate     # zastosuj migracje (alembic upgrade head)
-make backend     # uruchom backend (port 8000)
-make frontend    # uruchom frontend (port 3000)
+make up          # opcjonalnie: PostgreSQL z docker-compose
+make down        # zatrzymaj kontenery Dockera
+make install     # poetry + npm w frontend
+make migrate     # alembic upgrade head
+make backend     # uvicorn
+make frontend    # next dev
 
-# Nowa migracja po zmianie modeli:
 make migration msg="nazwa_migracji"
 ```
 
@@ -103,36 +106,18 @@ make migration msg="nazwa_migracji"
 
 ```
 cognoscere/
-├── app/                        # Backend FastAPI
-│   ├── main.py                 # Punkt wejscia aplikacji
-│   ├── config.py               # Konfiguracja z .env
-│   ├── database.py             # Polaczenie z PostgreSQL (async)
-│   ├── models/                 # Modele SQLAlchemy
-│   │   ├── user.py             # Uzytkownicy (terapeuta/pacjent)
-│   │   └── invitation.py       # Zaproszenia dla pacjentow
-│   ├── schemas/                # Schematy Pydantic (walidacja)
-│   │   └── auth.py
-│   ├── services/               # Logika biznesowa
-│   │   └── auth.py             # JWT, bcrypt
-│   └── routers/                # Endpointy API
-│       ├── auth.py             # /api/auth/*
-│       └── deps.py             # Zaleznosci FastAPI (get_current_user)
-├── alembic/                    # Migracje bazy danych
-│   ├── env.py
-│   └── versions/               # Pliki migracji (generowane automatycznie)
-├── frontend/                   # Frontend Next.js 15
-│   ├── app/
-│   │   ├── login/page.tsx      # Strona logowania
-│   │   ├── register/page.tsx   # Rejestracja terapeuty / pacjenta przez token
-│   │   └── dashboard/page.tsx  # Dashboard po zalogowaniu
-│   └── lib/
-│       ├── api.ts              # Klient HTTP z auto-refresh tokenow
-│       └── auth.ts             # Obs. tokenow JWT w localStorage
-├── docker-compose.yml          # PostgreSQL 16 + Redis 7
-├── pyproject.toml              # Projekt Python + zaleznosci
-├── alembic.ini                 # Konfiguracja Alembic
-├── Makefile                    # Skroty polecen
-└── .env.example                # Szablon zmiennych srodowiskowych
+├── app/
+│   ├── main.py
+│   ├── domain/                 # typy domenowe (np. role)
+│   ├── application/            # JWT, bootstrap admina
+│   ├── infrastructure/       # config, baza, ORM, OpenRouter (LLM)
+│   └── presentation/         # API FastAPI, schematy Pydantic
+├── alembic/
+├── frontend/                 # Next.js 15 (app/, lib/, components/)
+├── docker-compose.yml        # opcjonalnie: PostgreSQL w kontenerze
+├── pyproject.toml            # Poetry — zależności i metadane
+├── poetry.lock               # zablokowane wersje (generuje Poetry)
+└── .env.example
 ```
 
 ---
@@ -161,9 +146,7 @@ Pelna dokumentacja z przykladami: http://localhost:8000/docs
 | Backend | Python 3.12 + FastAPI |
 | Baza danych | PostgreSQL 16 (async przez asyncpg) |
 | ORM + migracje | SQLAlchemy 2.0 + Alembic |
-| Cache | Redis 7 |
-| Auth | JWT (python-jose) + bcrypt (passlib) |
-| AI dialog | Anthropic Claude API |
-| Transkrypcja glosu | OpenAI Whisper API |
+| Auth | JWT (python-jose) + bcrypt |
+| AI dialog | OpenRouter + klient OpenAI SDK; domyślnie model na infrastrukturze **Groq** (Llama 3.1 8B) |
 | Frontend | Next.js 15 + TypeScript + Tailwind CSS |
-| Email | Resend |
+| Panel admina | REST `/api/admin/*` (statystyki, użytkownicy, limity LLM, reset hasła, role) |
