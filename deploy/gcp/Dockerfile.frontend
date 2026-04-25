@@ -17,6 +17,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS=--max-old-space-size=4096
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ .
+# Next wymaga katalogu public/ (np. statyczne assety); bez niego `COPY` w etapie runner kończy się błędem
+RUN mkdir -p public
 ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
